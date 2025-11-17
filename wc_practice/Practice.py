@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import os
 import glob
+from ultralytics import YOLO
 
 def display_image(image):
     cv2.imshow("Image", image)
@@ -137,7 +138,7 @@ def camera_calibration(aruco_dict):
     return reprojection_error, camera_matrix, distortion_coefficients, rvecs, tvecs
 
 def aruco_detector(aruco_dict, camera_matrix, dist_coeffs):
-    image = cv2.imread("chessboard_w_tags.jpg")
+    image = cv2.imread("test1.jpg")
 
     #It performs filtering, corner refinement, and thresholding to find the corners in image
     parameters = cv2.aruco.DetectorParameters()
@@ -208,10 +209,10 @@ def get_chessboard_corner_obj_points(L):
         [-L, -L, 0]
     ], dtype=np.float32)
 
-    chessboard_corner_obj_points = [obj_points_BR, obj_points_TR, obj_points_TL, obj_points_BL]
+    chessboard_corner_obj_points = [obj_points_TL, obj_points_TR, obj_points_BL, obj_points_BR]
     return chessboard_corner_obj_points
 
-def get_pixel_coords(rvec, tvec, camera_matrix, dist_coeffs):
+def get_src_coords(rvec, tvec, camera_matrix, dist_coeffs):
     origin = np.array([[0.0, 0.0, 0.0]], dtype=np.float32)
     pixel_coords, jacobian = cv2.projectPoints(
         origin,  # 1. The 3D point (the origin)
@@ -220,60 +221,102 @@ def get_pixel_coords(rvec, tvec, camera_matrix, dist_coeffs):
         camera_matrix,  # 4. Camera intrinsic matrix
         dist_coeffs  # 5. Camera distortion coefficients
     )
-    pixel_x_coord = int(pixel_coords[0][0][0])
-    pixel_y_coord = int(pixel_coords[0][0][1])
-    return pixel_x_coord, pixel_y_coord
+    x_src_coord = int(pixel_coords[0][0][0])
+    y_src_coord = int(pixel_coords[0][0][1])
+    return  x_src_coord, y_src_coord
 
-def chessboard_corner_detection(aruco_dict, camera_matrix, dist_coeffs):
-    image = cv2.imread("chessboard_w_tags.jpg")
+def apply_homography(aruco_dict, camera_matrix, dist_coeffs):
+    image = cv2.imread("test1.jpg")
 
     parameters = cv2.aruco.DetectorParameters()
     detector = cv2.aruco.ArucoDetector(aruco_dict, parameters)
     corners, ids, rejected = detector.detectMarkers(image)
 
+    print(ids)
+
     aruco_marker_size = 0.025 #mm
     obj_points = get_chessboard_corner_obj_points(aruco_marker_size)
 
-    pixel_coords = []
+    #Estimate the pose for each aruco marker
+    src_coords = []
     for i in range(4):
         success, rvec, tvec = cv2.solvePnP(obj_points[i], corners[i], camera_matrix, dist_coeffs)
         if success:
-            pixel_x_coord, pixel_y_coord = get_pixel_coords(rvec, tvec, camera_matrix, dist_coeffs)
-            pixel_coords.append([pixel_x_coord, pixel_y_coord])
+            cv2.drawFrameAxes(image, camera_matrix, dist_coeffs, rvec, tvec, aruco_marker_size * 0.5)
+            #returns the "origin" of each aruco marker in pixels and stores it
+            x_src_coord, y_src_coord = get_src_coords(rvec, tvec, camera_matrix, dist_coeffs)
+            src_coords.append([x_src_coord, y_src_coord])
 
-    pixel_coords = np.array(pixel_coords, dtype=np.float32)
-    print(pixel_coords)
+    #convert to type np.array
+    src_coords = np.array(src_coords, dtype=np.float32)
+    print(src_coords)
 
-    OUTPUT_HEIGHT_PX = 800
-    BOARD_HEIGHT_M = 0.37465
-    BOARD_WIDTH_M = 0.3467125
+    display_height_pixels = 800
+    board_height = 0.37465
+    board_width = 0.3467125
+    scale_factor = display_height_pixels/board_height
+    print(scale_factor) #pixels
+    display_width_pixels = int(board_width * scale_factor)
+    print(display_width_pixels)
 
-    # Calculate proportional width
-    scale_factor = OUTPUT_HEIGHT_PX / BOARD_HEIGHT_M
-    OUTPUT_WIDTH_PX = int(BOARD_WIDTH_M * scale_factor)  # Approx 740
+    #Destination points represents the location in the displayed image where I want the source points to map to
+    destination_coords = (
+        [display_width_pixels, display_height_pixels],
+        [0.0, display_height_pixels],
+        [display_width_pixels, 0.0],
+        [0.0, 0.0]
+    )
 
-    # 2. Define destination points in PIXELS (0 to Max Dimension)
-    destination_points_px = [
-        [0.0, 0.0],
-        [0.0, OUTPUT_HEIGHT_PX],
-        [OUTPUT_WIDTH_PX, OUTPUT_HEIGHT_PX],
-        [OUTPUT_WIDTH_PX, 0.0]
-    ]
+    destination_coords = np.array(destination_coords, dtype=np.float32)
 
-    destination_points = np.array(destination_points_px, dtype=np.float32)
-    # The homography matrix H now maps image pixels to the new 740x800 pixel plane.
+    # The homography matrix H maps the src coords so that they are placed at the destination coord I specified in the new image frame
+    h, mask = cv2.findHomography(src_coords, destination_coords)
 
-    # ... (findHomography call)
-    h, mask = cv2.findHomography(pixel_coords, destination_points)
-
-    # 3. Use the matching pixel size for the warp operation
-    output_size = (OUTPUT_WIDTH_PX, OUTPUT_HEIGHT_PX)
-    warped_image = cv2.warpPerspective(image, h, output_size)
+    warped_image = cv2.warpPerspective(image, h, (display_width_pixels, display_height_pixels))
 
     cv2.imshow("Original Image", image)
     cv2.imshow("Warped Top-Down View", warped_image)
+    cv2.imwrite("chessboard_w_homography.jpg", warped_image)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
+
+def get_chess_piece_location():
+    #loads in our trained YOLO model
+    model = YOLO("ChessModel.pt")
+
+    #model("image.jpg") returns a list of results objects, one per image
+    results = model("chessboard_w_homography.jpg")
+    res = results[0]
+
+    #res.boxes contains all detected objects in the object
+    #box in the loop represents 1 detected object
+    for box in res.boxes:
+
+        #box.xywh is an object that gives us the x and y in pixels
+        #need int() because it returns a float
+        cx = int(box.xywh[0][0])
+        cy = int(box.xywh[0][1])
+
+        #box.class gives us the class index
+        #need int because it returns a tensor
+        cls = int(box.cls[0])
+        name = model.names[cls]
+
+        print(f"\nDetected: {name}")
+        #print(f"  Center (YOLO xywh): ({cx}, {cy})")
+
+        #file represents the x
+        file_index = ('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h')
+        #rank represents the y
+        rank_index = ('8', '7', '6', '5', '4', '3', '2', '1')
+
+        square_x_length = 740/8
+        square_y_length = 800/8
+        file = int(cx//square_x_length)
+        rank = int(cy//square_y_length)
+
+        FEN_square = (file_index[file], rank_index[rank])
+        print(FEN_square)
 
 def main():
     #Calls the dictionary we want to use
@@ -291,7 +334,8 @@ def main():
 
     aruco_dict_to_use = get_dictionary("DICT_5X5_50")
     #aruco_detector(aruco_dict_to_use, camera_matrix, dist_coeffs)
-    chessboard_corner_detection(aruco_dict_to_use, camera_matrix, dist_coeffs)
+    apply_homography(aruco_dict_to_use, camera_matrix, dist_coeffs)
+    get_chess_piece_location()
 
 if __name__ == "__main__":
     main()
