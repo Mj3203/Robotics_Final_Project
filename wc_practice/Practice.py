@@ -138,7 +138,7 @@ def camera_calibration(aruco_dict):
     return reprojection_error, camera_matrix, distortion_coefficients, rvecs, tvecs
 
 def aruco_detector(aruco_dict, camera_matrix, dist_coeffs):
-    image = cv2.imread("test1.jpg")
+    image = cv2.imread("chessboard_w_pieces.jpg")
 
     #It performs filtering, corner refinement, and thresholding to find the corners in image
     parameters = cv2.aruco.DetectorParameters()
@@ -226,7 +226,7 @@ def get_src_coords(rvec, tvec, camera_matrix, dist_coeffs):
     return  x_src_coord, y_src_coord
 
 def apply_homography(aruco_dict, camera_matrix, dist_coeffs):
-    image = cv2.imread("test1.jpg")
+    image = cv2.imread("chessboard_w_pieces.jpg")
 
     parameters = cv2.aruco.DetectorParameters()
     detector = cv2.aruco.ArucoDetector(aruco_dict, parameters)
@@ -282,7 +282,7 @@ def apply_homography(aruco_dict, camera_matrix, dist_coeffs):
 
 def get_chess_piece_location():
     #loads in our trained YOLO model
-    model = YOLO("ChessModel.pt")
+    model = YOLO("trained_models/best.pt")
 
     #model("image.jpg") returns a list of results objects, one per image
     results = model("chessboard_w_homography.jpg")
@@ -291,7 +291,6 @@ def get_chess_piece_location():
     #res.boxes contains all detected objects in the object
     #box in the loop represents 1 detected object
     for box in res.boxes:
-
         #box.xywh is an object that gives us the x and y in pixels
         #need int() because it returns a float
         cx = int(box.xywh[0][0])
@@ -317,6 +316,8 @@ def get_chess_piece_location():
 
         FEN_square = (file_index[file], rank_index[rank])
         print(FEN_square)
+
+    res.show()
 
 def main():
     #Calls the dictionary we want to use
