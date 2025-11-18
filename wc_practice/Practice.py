@@ -132,9 +132,9 @@ def camera_calibration(aruco_dict):
 
     reprojection_error, camera_matrix, distortion_coefficients, rvecs, tvecs = cv2.calibrateCamera(all_obj_points, all_img_points, image_size, None, None)
 
-    print("Reprojection Error", reprojection_error)
-    print("Camera Matrix", camera_matrix)
-    print("Distortion Matrix", distortion_coefficients)
+    #print("Reprojection Error", reprojection_error)
+    #print("Camera Matrix", camera_matrix)
+    #print("Distortion Matrix", distortion_coefficients)
     return reprojection_error, camera_matrix, distortion_coefficients, rvecs, tvecs
 
 def aruco_detector(aruco_dict, camera_matrix, dist_coeffs):
@@ -178,7 +178,7 @@ def aruco_detector(aruco_dict, camera_matrix, dist_coeffs):
     # Show the image with all poses drawn
     scale = 0.5
     resized = cv2.resize(image, (0, 0), fx=scale, fy=scale)
-    display_image(resized)
+    #display_image(resized)
 
 def get_chessboard_corner_obj_points(L):
     obj_points_BL = np.array([
@@ -232,8 +232,6 @@ def apply_homography(aruco_dict, camera_matrix, dist_coeffs):
     detector = cv2.aruco.ArucoDetector(aruco_dict, parameters)
     corners, ids, rejected = detector.detectMarkers(image)
 
-    print(ids)
-
     aruco_marker_size = 0.025 #mm
     obj_points = get_chessboard_corner_obj_points(aruco_marker_size)
 
@@ -249,15 +247,13 @@ def apply_homography(aruco_dict, camera_matrix, dist_coeffs):
 
     #convert to type np.array
     src_coords = np.array(src_coords, dtype=np.float32)
-    print(src_coords)
+    #print(src_coords)
 
     display_height_pixels = 800
     board_height = 0.37465
     board_width = 0.3467125
     scale_factor = display_height_pixels/board_height
-    print(scale_factor) #pixels
     display_width_pixels = int(board_width * scale_factor)
-    print(display_width_pixels)
 
     #Destination points represents the location in the displayed image where I want the source points to map to
     destination_coords = (
@@ -274,13 +270,13 @@ def apply_homography(aruco_dict, camera_matrix, dist_coeffs):
 
     warped_image = cv2.warpPerspective(image, h, (display_width_pixels, display_height_pixels))
 
-    cv2.imshow("Original Image", image)
-    cv2.imshow("Warped Top-Down View", warped_image)
-    cv2.imwrite("chessboard_w_homography.jpg", warped_image)
+    #cv2.imshow("Original Image", image)
+    #cv2.imshow("Warped Top-Down View", warped_image)
+    #cv2.imwrite("chessboard_w_homography.jpg", warped_image)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
-def get_chess_piece_location():
+def get_board_information():
     #loads in our trained YOLO model
     model = YOLO("trained_models/best.pt")
 
@@ -290,6 +286,8 @@ def get_chess_piece_location():
 
     #res.boxes contains all detected objects in the object
     #box in the loop represents 1 detected object
+    board_dict= {}
+
     for box in res.boxes:
         #box.xywh is an object that gives us the x and y in pixels
         #need int() because it returns a float
@@ -301,23 +299,53 @@ def get_chess_piece_location():
         cls = int(box.cls[0])
         name = model.names[cls]
 
-        print(f"\nDetected: {name}")
-        #print(f"  Center (YOLO xywh): ({cx}, {cy})")
-
-        #file represents the x
-        file_index = ('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h')
-        #rank represents the y
-        rank_index = ('8', '7', '6', '5', '4', '3', '2', '1')
+        #file represents the x (list of strings)
+        file_index = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']
+        #rank represents the y (list of strings)
+        rank_index = ['8', '7', '6', '5', '4', '3', '2', '1']
 
         square_x_length = 740/8
         square_y_length = 800/8
+
         file = int(cx//square_x_length)
         rank = int(cy//square_y_length)
 
-        FEN_square = (file_index[file], rank_index[rank])
-        print(FEN_square)
+        #combine the strings to get the fen square
+        fen_square = (file_index[file] + rank_index[rank])
 
+        board_dict[fen_square] = name
+
+    #print(board_dict)
+    #print(board_dict['g3'])
     res.show()
+    return board_dict
+
+def compare_dictionary(previous_board_state):
+    current_board_state = {
+                           'b3': 'White Queen',
+                           'e1': 'White King',
+                           'e8': 'Black King',
+                           'g8': 'Black Knight',
+                           'd8': 'Black Queen',
+                           'a5': 'Black Rook',
+                           'g3': 'White Rook',
+                           'f8': 'White Bishop',
+                           'c6': 'Black Pawn'
+                           }
+
+    prev_key = None
+    for key in previous_board_state:
+        if key not in current_board_state:
+            print(f'{key} is not present in the current board state')
+            prev_key = key
+
+    curr_key = None
+    for key in current_board_state:
+        if key not in previous_board_state:
+            print(f'{key} is not present in the previous board state')
+            curr_key = key
+
+    print(f'{prev_key+curr_key} is the move that was made')
 
 def main():
     #Calls the dictionary we want to use
@@ -336,7 +364,8 @@ def main():
     aruco_dict_to_use = get_dictionary("DICT_5X5_50")
     #aruco_detector(aruco_dict_to_use, camera_matrix, dist_coeffs)
     apply_homography(aruco_dict_to_use, camera_matrix, dist_coeffs)
-    get_chess_piece_location()
+    board_dict = get_board_information()
+    compare_dictionary(board_dict)
 
 if __name__ == "__main__":
     main()
